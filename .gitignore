@@ -1,0 +1,43 @@
+# Credentials, sessions and local application state
+*.dpapi
+*.dpapi.*
+*.cookie
+*.cookies
+*cookies*.json
+*credentials*.json
+settings.json
+.env
+.env.*
+!.env.example
+browser/
+profile/
+data/
+logs/
+*.log
+*.har
+
+# Build products and Python environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.spec
+*.exe
+*.dll
+*.zip
+
+# Captured pages, screenshots and temporary files
+*.html
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.tmp
+work/
+.pytest_cache/
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
