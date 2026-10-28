@@ -95,7 +95,7 @@ class Client:
         self.session = requests.Session()
         # Campus service is reached directly; do not inherit a development-shell proxy.
         self.session.trust_env = False
-        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.2', 'Referer': BASE + '/'})
+        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.1', 'Referer': BASE + '/'})
         self.soup = None
         self.pending = None
         try:
@@ -209,9 +209,9 @@ class App:
     def __init__(self, root, store=None, start_worker=True):
         self.root = root
         self.store = store or Store()
-        root.title('校园网助手 · 北航 · 2.2')
-        root.geometry('1040x850')
-        root.minsize(900, 620)
+        root.title('北航流量助手 · 接口版 2.1')
+        root.geometry('620x760')
+        root.minsize(620, 760)
         self.jobs, self.results = queue.Queue(), queue.Queue()
         self.busy = False
         self.authenticated = False
@@ -241,9 +241,45 @@ class App:
             self.user.set(credentials.get('username', ''))
         if self.remember_password.get():
             self.password.set(credentials.get('password', ''))
-        from desktop_ui import DesktopView
+        frame = tk.Frame(root, padx=24, pady=20)
+        frame.pack(fill='both', expand=True)
+        tk.Label(frame, text='校园网余量', font=('Microsoft YaHei UI', 21, 'bold')).pack(anchor='w')
+        tk.Label(frame, text='计费流量剩余 · 网站记录值', fg='#566578').pack(anchor='w', pady=(6, 0))
+        tk.Label(frame, textvariable=self.remaining, font=('Microsoft YaHei UI', 34, 'bold'), fg='#167866').pack(anchor='w')
+        tk.Label(frame, textvariable=self.detail, justify='left').pack(anchor='w')
+        row = tk.Frame(frame)
+        row.pack(fill='x', pady=14)
         self.buttons = []
-        self.view = DesktopView(self)
+        self.button(row, '刷新余量', lambda: self.submit('home'))
+        self.button(row, '下线并自动重查…', self.offline)
+        timers = tk.LabelFrame(frame, text='定时任务 · 程序运行且已登录时生效', padx=10, pady=8)
+        timers.pack(fill='x', pady=4)
+        for i, (text, enabled, interval, choices) in enumerate([
+            ('自动刷新余量，每', self.auto, self.refresh_minutes, (1, 2, 5, 10, 15, 30, 60)),
+            ('自动下线并重查，每', self.auto_offline, self.offline_minutes, (1, 5, 10, 15, 30, 60, 120, 180, 360))]):
+            tk.Checkbutton(timers, text=text, variable=enabled, command=lambda e=enabled: self.timer_changed(e)).grid(row=i, column=0, sticky='w')
+            box = ttk.Combobox(timers, textvariable=interval, values=choices, state='readonly', width=6)
+            box.grid(row=i, column=1, padx=6, pady=4)
+            box.bind('<<ComboboxSelected>>', lambda _: self.timer_changed())
+            tk.Label(timers, text='分钟').grid(row=i, column=2)
+        tk.Label(timers, textvariable=self.countdown, fg='#566578').grid(row=2, column=0, columnspan=3, sticky='w', pady=4)
+        login = tk.LabelFrame(frame, text='登录 · 验证码在此填写', padx=12, pady=10)
+        login.pack(fill='x', pady=12)
+        for i, (label, var, secret) in enumerate([('学号', self.user, False), ('密码', self.password, True), ('验证码', self.code, False)]):
+            tk.Label(login, text=label).grid(row=i, column=0, sticky='w', pady=4)
+            tk.Entry(login, textvariable=var, show='•' if secret else '', width=24).grid(row=i, column=1, padx=8)
+        self.captcha_label = tk.Label(login, text='点击获取验证码', width=19)
+        self.captcha_label.grid(row=0, column=2, rowspan=2)
+        buttons = tk.Frame(login)
+        buttons.grid(row=3, column=0, columnspan=3, sticky='w', pady=(8, 0))
+        self.button(buttons, '获取 / 更换验证码', lambda: self.submit('captcha'))
+        self.button(buttons, '登录', self.login)
+        remember = tk.Frame(login)
+        remember.grid(row=4, column=0, columnspan=3, sticky='w', pady=(8, 0))
+        tk.Checkbutton(remember, text='记住账号', variable=self.remember_user, command=lambda: self.credentials_changed('user')).pack(side='left')
+        tk.Checkbutton(remember, text='保存密码（Windows 加密）', variable=self.remember_password, command=lambda: self.credentials_changed('password')).pack(side='left')
+        tk.Label(frame, text='在线用量可能尚未结算。下线会断开账号下的在线设备。\n下线后自动查询约 6 秒；最终仍以服务器结算为准。', justify='left', fg='#806227').pack(anchor='w', pady=6)
+        tk.Label(frame, textvariable=self.status, wraplength=520, justify='left', fg='#42556c').pack(anchor='w', pady=8)
         if start_worker:
             threading.Thread(target=self.worker, daemon=True).start()
             root.after(300, lambda: self.submit('home'))
@@ -289,28 +325,23 @@ class App:
         self.closing = True
         self.root.destroy()
 
+    def button(self, parent, text, command):
+        button = tk.Button(parent, text=text, command=command, padx=10, pady=5)
+        button.pack(side='left', padx=(0, 8))
+        self.buttons.append(button)
+
     def submit(self, command, *args, automatic=False):
         if self.busy:
             return
         self.busy = True
         self.active_command = command
         self.active_auto = automatic
-        self.view.set_busy(True)
-        if command in ('login', 'sms'):
-            self.view.login_hint.set('正在验证登录信息…')
         for button in self.buttons:
             button.config(state='disabled')
         self.status.set('请求中…' if command != 'offline' else '正在下线并等待结算，随后自动重查…')
         self.jobs.put((command, args))
 
     def login(self):
-        if self.busy:
-            return
-        for name, var in [('学号', self.user), ('密码', self.password), ('验证码', self.code)]:
-            if not var.get().strip():
-                self.view.login_hint.set('请填写' + name + '。')
-                self.view.entries[name].focus_set()
-                return
         args = (self.user.get().strip(), self.password.get(), self.code.get().strip())
         if not self.persist():
             return
@@ -349,7 +380,6 @@ class App:
                 kind, result = self.results.get_nowait()
                 if kind == 'idle':
                     self.busy = False
-                    self.view.set_busy(False)
                     now = time.monotonic()
                     if self.active_command in ('home', 'offline', 'login', 'sms'):
                         self.next_refresh = now + int(self.refresh_minutes.get()) * 60
@@ -362,8 +392,6 @@ class App:
                         self.reset_timers()
                     self.authenticated = True
                     record = result[0]
-                    self.view.show_record(record, time.strftime('%H:%M:%S'))
-                    self.view.login_hint.set('会话已恢复，可直接查询。')
                     self.remaining.set(value(record, '计费流量剩余'))
                     self.detail.set('已用：' + value(record, '已用流量') + '    免费剩余：' + value(record, '免费流量剩余') + '\n结算日期：' + value(record, '结算日期'))
                     self.status.set(('下线请求已发送，已重查；结算完成时间以学校服务器为准。' if kind == 'offline_data' else '查询成功。') + ' 更新于 ' + time.strftime('%H:%M:%S') + (f'，显示 {len(result)} 个产品中的第一个。' if len(result) > 1 else ''))
@@ -374,16 +402,12 @@ class App:
                         image = Image.open(io.BytesIO(result))
                         image.thumbnail((150, 64))
                         self.photo = ImageTk.PhotoImage(image)
-                        self.captcha_label.config(image=self.photo, text='', width=150, height=50)
+                        self.captcha_label.config(image=self.photo, text='', width=150)
                         self.code.set('')
-                        self.view.login_hint.set('验证码已更新，填写后按 Enter 登录。')
                         self.status.set('验证码已获取，请填写后登录。')
                 elif kind == 'sms':
                     sms_prompt = result
                 elif kind in ('error', 'expired'):
-                    self.view.connection.set('需要登录' if kind == 'expired' else '操作未完成')
-                    if self.active_command in ('login', 'sms', 'captcha') or kind == 'expired':
-                        self.view.login_hint.set(result)
                     if kind == 'expired':
                         self.authenticated = False
                     if self.active_command == 'offline':
