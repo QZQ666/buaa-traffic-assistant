@@ -1,6 +1,5 @@
 """Direct HTTP client for the public BUAA self-service web protocol."""
 import base64
-import io
 import json
 import os
 import queue
@@ -9,6 +8,7 @@ import threading
 import time
 from http.cookiejar import Cookie
 from pathlib import Path
+from urllib.parse import urljoin, urlsplit
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
@@ -16,7 +16,6 @@ import requests
 from bs4 import BeautifulSoup
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
-from PIL import Image, ImageTk
 
 BASE = 'https://zfw.buaa.edu.cn'
 
@@ -88,6 +87,21 @@ def value(record, label):
     return next((v for k, v in record.items() if label in k), '—')
 
 
+def captcha_image_data(raw):
+    """Accept only small PNG/GIF CAPTCHA images supported by native Tk."""
+    if len(raw) > 512 * 1024:
+        raise ValueError('验证码图片异常大，请重新获取。')
+    if raw.startswith(b'\x89PNG\r\n\x1a\n') and len(raw) >= 24:
+        width, height = int.from_bytes(raw[16:20], 'big'), int.from_bytes(raw[20:24], 'big')
+    elif raw[:6] in (b'GIF87a', b'GIF89a') and len(raw) >= 10:
+        width, height = int.from_bytes(raw[6:8], 'little'), int.from_bytes(raw[8:10], 'little')
+    else:
+        raise ValueError('服务器未返回 PNG/GIF 验证码图片，请确认校园网站可正常访问。')
+    if not (0 < width <= 1200 and 0 < height <= 400):
+        raise ValueError('验证码图片尺寸异常，请重新获取。')
+    return base64.b64encode(raw)
+
+
 class Client:
     def __init__(self, store=None):
         self.store = store or Store()
@@ -95,7 +109,7 @@ class Client:
         self.session = requests.Session()
         # Campus service is reached directly; do not inherit a development-shell proxy.
         self.session.trust_env = False
-        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.1', 'Referer': BASE + '/'})
+        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.1.1', 'Referer': BASE + '/'})
         self.soup = None
         self.pending = None
         try:
@@ -112,10 +126,26 @@ class Client:
     def request(self, method, path, **kwargs):
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('拒绝非本站请求')
-        response = self.session.request(method, BASE + path, timeout=(8, 20), **kwargs)
-        response.raise_for_status()
-        response.encoding = 'utf-8'
-        return response
+        url = BASE + path
+        for _ in range(6):
+            target = urlsplit(url)
+            if (target.scheme != 'https' or target.hostname != 'zfw.buaa.edu.cn'
+                    or target.port not in (None, 443) or target.username or target.password):
+                raise ValueError('网站跳转到非本站 HTTPS 地址，已停止请求以保护登录信息。')
+            response = self.session.request(method, url, timeout=(8, 20), allow_redirects=False, **kwargs)
+            if not response.is_redirect:
+                response.raise_for_status()
+                response.encoding = 'utf-8'
+                return response
+            location = response.headers['Location']
+            status = response.status_code
+            response.close()
+            url = urljoin(url, location)
+            if status == 303 or (status in (301, 302) and method.upper() == 'POST'):
+                method = 'GET'
+                kwargs.pop('data', None)
+                kwargs.pop('json', None)
+        raise ValueError('网站跳转次数过多，请稍后重试。')
 
     def csrf(self):
         token = self.soup.select_one('meta[name="csrf-token"]')
@@ -209,7 +239,7 @@ class App:
     def __init__(self, root, store=None, start_worker=True):
         self.root = root
         self.store = store or Store()
-        root.title('北航流量助手 · 接口版 2.1')
+        root.title('北航流量助手 · 接口版 2.1.1')
         root.geometry('620x760')
         root.minsize(620, 760)
         self.jobs, self.results = queue.Queue(), queue.Queue()
@@ -399,9 +429,13 @@ class App:
                     if result is None:
                         self.status.set('当前会话已登录，点击刷新余量即可。')
                     else:
-                        image = Image.open(io.BytesIO(result))
-                        image.thumbnail((150, 64))
-                        self.photo = ImageTk.PhotoImage(image)
+                        try:
+                            photo = tk.PhotoImage(data=captcha_image_data(result))
+                            scale = max(1, (photo.width() + 149) // 150, (photo.height() + 63) // 64)
+                            self.photo = photo.subsample(scale, scale)
+                        except (ValueError, tk.TclError) as exc:
+                            self.status.set('验证码图片读取失败：' + str(exc))
+                            continue
                         self.captcha_label.config(image=self.photo, text='', width=150)
                         self.code.set('')
                         self.status.set('验证码已获取，请填写后登录。')

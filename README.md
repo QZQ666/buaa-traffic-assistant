@@ -1,6 +1,8 @@
 # 北航校园网流量助手
 
-Windows 桌面小工具，通过北航校园网自助服务平台的 HTTPS 请求查询余量，无需启动浏览器。当前版本为 2.1。
+Windows 桌面小工具，通过北航校园网自助服务平台的 HTTPS 请求查询余量，无需启动浏览器。当前版本为 2.1.1，保留 2.1 界面。
+
+2.1.1 限制请求跳转只能发生在学校 HTTPS 域名内，更新网络依赖，并移除不必要的 Pillow 图像依赖；验证码使用原生 Tk 显示。下载请使用最新 Release，旧版 2.1.0 的安装包已撤下。隐私与安全说明见 [SECURITY.md](SECURITY.md)。
 
 ## 功能
 
@@ -53,10 +55,10 @@ DPAPI 数据可由当前 Windows 用户解密，请勿分享会话或凭据文�
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pyinstaller==6.20.0
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --onefile --windowed --name BuaaTrafficAPI_2.1 api_app.py
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --onefile --windowed --name BuaaTrafficAPI_2.1.1 api_app.py
 ```
 
-结果在 `dist/BuaaTrafficAPI_2.1.exe`。打包文件没有加入仓库。
+结果在 `dist/BuaaTrafficAPI_2.1.1.exe`。打包文件没有加入 Git 源码，发布包放在 Releases。
 
 ## 验证
 
@@ -65,6 +67,7 @@ DPAPI 数据可由当前 Windows 用户解密，请勿分享会话或凭据文�
 ```powershell
 python tests/test_api.py
 python tests/test_persistence_timers.py
+python tests/test_request_security.py
 ```
 
 测试使用虚构账号、会话和用量，不访问真实账号、不执行真实下线。覆盖 RSA 加密、CSRF 提交、表格解析、DPAPI 保存恢复、账号密码保存选项、定时任务优先级、防重入及错误暂停。
