@@ -1,6 +1,8 @@
 # 北航校园网流量助手
 
-Windows 桌面小工具，通过北航校园网自助服务平台的 HTTPS 请求查询余量，无需启动浏览器。当前版本为 2.1.3，沿用 2.1 的紧凑单列界面。
+Windows 桌面小工具，通过北航校园网自助服务平台的 HTTPS 请求查询余量，无需启动浏览器。当前版本为 2.1.4，沿用 2.1 的紧凑单列界面。
+
+2.1.4 增加当前产品的流量包列表：名称、可用 / 总流量、有效期、购买时间。选中一行显示完整名称和网站统计明细，刷新时同步更新；失败时标明旧记录。流量包和产品余量分开显示，不擅自相加或推断有效期状态。
 
 2.1.3 修复流量包子表嵌套时的产品余量识别：只读取当前产品表的行和单元格，不把套餐详情混入产品列。当前显示的是原产品字段，不将套餐包流量擅自加到计费余量中。
 
@@ -12,6 +14,7 @@ Windows 桌面小工具，通过北航校园网自助服务平台的 HTTPS 请�
 
 - 在工具内手动填写学号、密码、图形验证码，支持短信验证分支。
 - 显示计费流量剩余、免费流量剩余、已用流量及结算日期。
+- 显示流量包列表及所选包的完整明细，支持嵌套和展开两种表格结构。
 - 自动保存并尝试恢复本机 Cookie；会话有效时无需再次登录。
 - 账号和密码分别选择是否保存，密码与 Cookie 使用 Windows DPAPI 加密。
 - 下拉选择自动刷新间隔，以及独立的自动下线并重查间隔，显示倒计时并保留设置。
@@ -59,10 +62,10 @@ DPAPI 数据可由当前 Windows 用户解密，请勿分享会话或凭据文�
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pyinstaller==6.20.0
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --onefile --windowed --name BuaaTrafficAPI_2.1.3 api_app.py
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --onefile --windowed --name BuaaTrafficAPI_2.1.4 api_app.py
 ```
 
-结果在 `dist/BuaaTrafficAPI_2.1.3.exe`。打包文件没有加入 Git 源码，发布包放在 Releases。
+结果在 `dist/BuaaTrafficAPI_2.1.4.exe`。打包文件没有加入 Git 源码，发布包放在 Releases。
 
 ## 验证
 

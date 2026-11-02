@@ -47,6 +47,10 @@ class CompactView:
         style.configure('Compact.TCheckbutton', font=(FONT, 10), background=COLORS['background'], foreground=COLORS['text'], padding=(0, 3))
         style.map('Compact.TCheckbutton', background=[('active', COLORS['background'])])
         style.configure('Compact.Horizontal.TProgressbar', background=COLORS['accent'], borderwidth=0)
+        style.configure('Packages.Treeview', font=(FONT, 9), rowheight=28,
+                        background=COLORS['field'], fieldbackground=COLORS['field'], foreground=COLORS['text'])
+        style.configure('Packages.Treeview.Heading', font=(FONT, 9, 'bold'), background=COLORS['secondary'], foreground=COLORS['text'])
+        style.map('Packages.Treeview', background=[('selected', COLORS['accent'])], foreground=[('selected', 'white')])
 
         shell = tk.Frame(self.root, bg=COLORS['background'])
         shell.pack(fill='both', expand=True)
@@ -77,6 +81,21 @@ class CompactView:
         self.refresh = self.button(actions, '刷新余量', lambda: app.submit('home'), 'Primary.Compact.TButton', width=12)
         self.refresh.pack(side='left', padx=(0, 8))
         self.button(actions, '下线并自动重查…', app.offline, 'Danger.Compact.TButton').pack(side='left')
+
+        self.section('流量包')
+        self.package_items = []
+        self.package_caption = tk.StringVar(value='查询后显示网站提供的流量包记录。')
+        self.package_details = tk.StringVar(value='流量包单独列出，不与上方产品余量相加。')
+        self.label(self.body, variable=self.package_caption, size=9).pack(anchor='w', pady=(0, 6))
+        self.package_table = ttk.Treeview(self.body, columns=('name', 'traffic', 'valid', 'purchased'),
+                                         show='headings', selectmode='browse', style='Packages.Treeview', height=1)
+        for key, title, width, minimum in [('name', '流量包', 175, 100), ('traffic', '可用 / 总流量', 150, 120),
+                                           ('valid', '有效期', 65, 55), ('purchased', '购买时间', 100, 90)]:
+            self.package_table.heading(key, text=title)
+            self.package_table.column(key, width=width, minwidth=minimum, stretch=key == 'name', anchor='w')
+        self.package_table.bind('<<TreeviewSelect>>', self.select_package)
+        self.package_details_label = self.label(self.body, variable=self.package_details, size=9, wrap=520)
+        self.package_details_label.pack(anchor='w')
 
         self.section('定时任务')
         timers = self.row(self.body)
@@ -168,7 +187,8 @@ class CompactView:
             self.scroll.pack_forget()
             self.canvas.yview_moveto(0)
         wrap = max(250, self.canvas.winfo_width()-48)
-        for widget in (getattr(self, 'hint_label', None), getattr(self, 'countdown_label', None), getattr(self, 'warning', None)):
+        for widget in (getattr(self, 'hint_label', None), getattr(self, 'countdown_label', None),
+                       getattr(self, 'warning', None), getattr(self, 'package_details_label', None)):
             if widget:
                 widget.configure(wraplength=wrap)
 
@@ -209,6 +229,32 @@ class CompactView:
         self.connection_label.configure(fg=COLORS['accent'])
         self.set_hint('当前会话有效，无需重新登录。')
 
+    def set_packages(self, packages):
+        self.package_items = list(packages)
+        self.package_table.delete(*self.package_table.get_children())
+        if not packages:
+            self.package_table.pack_forget()
+            self.package_caption.set('本次页面未提供流量包记录。')
+            self.package_details.set('流量包单独列出，不与上方产品余量相加。')
+            return
+        self.package_caption.set(f'共 {len(packages)} 个流量包；数据与本次余量一起更新。')
+        self.package_table.configure(height=len(packages))
+        self.package_table.pack(fill='x', before=self.package_details_label, pady=(0, 6))
+        for i, package in enumerate(packages):
+            self.package_table.insert('', 'end', iid=str(i), values=(package.get('套餐名称', '—'),
+                package.get('可用流量', '—') + ' / ' + package.get('总流量', '—'),
+                package.get('有效期', '—'), package.get('购买时间', '—')))
+        self.package_table.selection_set('0')
+        self.select_package()
+
+    def select_package(self, event=None):
+        selection = self.package_table.selection()
+        if not selection or not self.package_items:
+            return
+        package = self.package_items[int(selection[0])]
+        self.package_details.set(package.get('套餐名称', '—') + '\n购买时间：' + package.get('购买时间', '—')
+            + '  有效期：' + package.get('有效期', '—') + '\n' + package.get('统计', '网站未提供统计明细。'))
+
     def set_hint(self, message, error=False):
         self.login_hint.set(message)
         self.hint_label.configure(fg=COLORS['danger' if error else 'muted'])
@@ -218,5 +264,7 @@ class CompactView:
         self.connection_label.configure(fg=COLORS['danger'])
         if self.last_update:
             self.updated.set('上次更新 ' + self.last_update)
+            if self.package_items:
+                self.package_caption.set(f'上次查询的 {len(self.package_items)} 个流量包；本次未更新。')
         if expired or self.app.active_command in ('login', 'sms', 'captcha'):
             self.set_hint(message, error=True)

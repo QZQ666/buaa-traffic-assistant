@@ -5,7 +5,7 @@ import tkinter as tk
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from api_app import App, Store, friendly_error
+from api_app import App, Store, ProductRecord, friendly_error
 from compact_ui import COLORS
 
 
@@ -45,6 +45,17 @@ with tempfile.TemporaryDirectory() as directory:
     assert '更新于' in app.view.updated.get()
     print('PASS: empty form validation and actual result state')
 
+    package = {'套餐名称': '示例流量包 A（长名称明细）', '可用流量': '18.500G', '总流量': '30.000G',
+               '购买时间': '2026-12-01', '有效期': '0天', '统计': '总流量：30.000G 可用流量：18.500G'}
+    app.results.put(('data', [ProductRecord({'已用流量':'12.500G', '计费流量剩余':'8.250G'}, [package])]))
+    app.poll()
+    root.update()
+    assert len(app.view.package_table.get_children()) == 1
+    assert app.view.package_table.item('0', 'values')[1] == '18.500G / 30.000G'
+    assert '0天' in app.view.package_details.get()
+    assert app.remaining.get() == '8.250G'
+    print('PASS: package list and complete selection details, product balance is not summed')
+
     for size in ('620x760', '560x620'):
         root.geometry(size)
         root.update()
@@ -71,6 +82,9 @@ with tempfile.TemporaryDirectory() as directory:
     app.poll()
     assert not app.busy and app.view.connection.get() == '操作失败'
     assert app.view.updated.get().startswith('上次更新')
+    assert '本次未更新' in app.view.package_caption.get()
     assert not app.view.progress.winfo_manager()
+    app.view.set_packages([])
+    assert not app.view.package_table.get_children() and not app.view.package_table.winfo_manager()
     root.destroy()
     print('PASS: loading, error recovery and stale-data indication')

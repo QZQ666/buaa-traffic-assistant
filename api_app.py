@@ -68,27 +68,64 @@ def restore_cookies(jar, data):
             jar.set_cookie(Cookie(**record))
 
 
+class ProductRecord(dict):
+    """Keep package data separate from the original product column mapping."""
+    def __init__(self, fields, packages=None):
+        super().__init__(fields)
+        self.packages = list(packages or [])
+
+
+def own_table_rows(table):
+    for row in table.find_all('tr'):
+        if row.find_parent('table') is not table:
+            continue
+        cells = [cell for cell in row.find_all(['th', 'td']) if cell.find_parent('tr') is row]
+        texts = [' '.join(text.strip() for text in cell.find_all(string=True)
+                          if text.find_parent('table') is table and text.strip()) for cell in cells]
+        yield row, texts
+
+
+def parse_packages(container):
+    packages = []
+    for table in container.find_all('table'):
+        headers = None
+        for _, texts in own_table_rows(table):
+            normalized = [re.sub(r'\s+', '', text) for text in texts]
+            if '套餐名称' in normalized or '流量包名称' in normalized:
+                headers = normalized
+                continue
+            if not headers or len(texts) != len(headers):
+                continue
+            record = dict(zip(headers, texts))
+            name = record.get('套餐名称') or record.get('流量包名称')
+            if not name:
+                continue
+            statistics = record.get('统计', '')
+            for label, aliases in [('总流量', '总流量|总量'), ('可用流量', '可用流量|剩余流量')]:
+                match = re.search(r'(?:' + aliases + r')\s*[:：]\s*([\d.]+\s*(?:GiB|GB|G|MiB|MB|M|KiB|KB|K|bytes?|B))', statistics, re.I)
+                if label not in record:
+                    record[label] = match.group(1) if match else '—'
+            record['套餐名称'] = name
+            packages.append(record)
+    return packages
+
+
 def parse_home(html):
     soup = BeautifulSoup(html, 'html.parser')
     for table in soup.select('table'):
         # Expansion widgets can put the package table inside a product cell in the
         # server response, then move it into a separate detail row in the browser.
         # Count only this table's rows and this row's cells, never nested tables.
-        rows = []
-        for row in table.find_all('tr'):
-            if row.find_parent('table') is not table:
-                continue
-            cells = [cell for cell in row.find_all(['th', 'td']) if cell.find_parent('tr') is row]
-            texts = []
-            for cell in cells:
-                parts = [text.strip() for text in cell.find_all(string=True)
-                         if text.find_parent('table') is table and text.strip()]
-                texts.append(' '.join(parts))
-            rows.append(texts)
-        for i, row in enumerate(rows):
+        rows = list(own_table_rows(table))
+        for i, (_, row) in enumerate(rows):
             heads = [re.sub(r'\s+', '', s) for s in row]
             if '已用流量' in heads and any('计费流量剩余' in s for s in heads):
-                records = [dict(zip(heads, vals)) for vals in rows[i+1:] if len(vals) == len(heads)]
+                records = []
+                for element, vals in rows[i+1:]:
+                    if len(vals) == len(heads):
+                        records.append(ProductRecord(zip(heads, vals), parse_packages(element)))
+                    elif records:
+                        records[-1].packages.extend(parse_packages(element))
                 if records:
                     return records
     if soup.select_one('#loginform-password'):
@@ -136,7 +173,7 @@ class Client:
         self.session = requests.Session()
         # Campus service is reached directly; do not inherit a development-shell proxy.
         self.session.trust_env = False
-        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.1.3', 'Referer': BASE + '/'})
+        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.1.4', 'Referer': BASE + '/'})
         self.soup = None
         self.pending = None
         try:
@@ -266,7 +303,7 @@ class App:
     def __init__(self, root, store=None, start_worker=True):
         self.root = root
         self.store = store or Store()
-        root.title('北航流量助手 · 2.1.3')
+        root.title('北航流量助手 · 2.1.4')
         root.geometry('620x760')
         root.minsize(560, 620)
         self.jobs, self.results = queue.Queue(), queue.Queue()
@@ -418,6 +455,7 @@ class App:
                     self.authenticated = True
                     self.view.success()
                     record = result[0]
+                    self.view.set_packages(getattr(record, 'packages', []))
                     self.remaining.set(value(record, '计费流量剩余'))
                     self.detail.set('已用：' + value(record, '已用流量') + '    免费剩余：' + value(record, '免费流量剩余') + '\n结算日期：' + value(record, '结算日期'))
                     self.status.set(('下线请求已发送，已重查；结算完成时间以学校服务器为准。' if kind == 'offline_data' else '查询成功。') + ' 更新于 ' + time.strftime('%H:%M:%S') + (f'，显示 {len(result)} 个产品中的第一个。' if len(result) > 1 else ''))

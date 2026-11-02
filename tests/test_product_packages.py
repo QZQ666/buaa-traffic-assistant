@@ -37,6 +37,22 @@ plain = '<table>' + headers + row.format('展开') + '</table>'
 assert parse_home(plain)[0]['已用流量'] == '12.500G'
 print('PASS: expanded detail rows and accounts without packages still work')
 
+assert records[0].packages[0]['套餐名称'] == '测试流量包'
+assert records[0].packages[0]['可用流量'] == '99G'
+assert len(parse_home(expanded)[0].packages) == 1
+assert not parse_home(plain)[0].packages
+full_package = '<table><tr><th>套餐名称</th><th>购买时间</th><th>有效期</th><th>统计</th></tr><tr><td>示例包A</td><td>2026-12-01</td><td>0天</td><td><button>总流量：30.000G</button><button>可用流量：18.500G</button><button>61%</button></td></tr></table>'
+multiple = '<table>' + headers + row.format(full_package) + row.format(package) + '</table>'
+products = parse_home(multiple)
+assert len(products) == 2
+assert products[0].packages[0]['总流量'] == '30.000G'
+assert products[0].packages[0]['可用流量'] == '18.500G'
+assert products[0].packages[0]['购买时间'] == '2026-12-01'
+assert products[0].packages[0]['有效期'] == '0天'
+assert products[1].packages[0]['套餐名称'] == '测试流量包'
+assert len(products[1].packages) == 1
+print('PASS: package statistics, literal validity and correct association to each product')
+
 try:
     parse_home('<input id="loginform-password">')
 except SessionExpired:
