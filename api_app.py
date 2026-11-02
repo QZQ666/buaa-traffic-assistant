@@ -10,7 +10,7 @@ from http.cookiejar import Cookie
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, simpledialog
 
 import requests
 from bs4 import BeautifulSoup
@@ -102,6 +102,20 @@ def captcha_image_data(raw):
     return base64.b64encode(raw)
 
 
+def friendly_error(exc):
+    """Display actionable network feedback without dumping transport internals."""
+    if isinstance(exc, requests.Timeout):
+        return '连接学校网站超时。请先确认浏览器能打开官网，再重试。'
+    if isinstance(exc, requests.exceptions.SSLError):
+        return '无法建立安全连接。请检查电脑时间和网络代理后重试。'
+    if isinstance(exc, requests.ConnectionError):
+        return '无法连接学校网站。请检查校园网连接和代理设置。'
+    if isinstance(exc, requests.HTTPError):
+        status = exc.response.status_code if exc.response is not None else '异常'
+        return f'学校网站返回 HTTP {status}，请稍后重试。'
+    return str(exc)
+
+
 class Client:
     def __init__(self, store=None):
         self.store = store or Store()
@@ -109,7 +123,7 @@ class Client:
         self.session = requests.Session()
         # Campus service is reached directly; do not inherit a development-shell proxy.
         self.session.trust_env = False
-        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.1.1', 'Referer': BASE + '/'})
+        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.1.2', 'Referer': BASE + '/'})
         self.soup = None
         self.pending = None
         try:
@@ -239,9 +253,9 @@ class App:
     def __init__(self, root, store=None, start_worker=True):
         self.root = root
         self.store = store or Store()
-        root.title('北航流量助手 · 接口版 2.1.1')
+        root.title('北航流量助手 · 2.1.2')
         root.geometry('620x760')
-        root.minsize(620, 760)
+        root.minsize(560, 620)
         self.jobs, self.results = queue.Queue(), queue.Queue()
         self.busy = False
         self.authenticated = False
@@ -271,45 +285,9 @@ class App:
             self.user.set(credentials.get('username', ''))
         if self.remember_password.get():
             self.password.set(credentials.get('password', ''))
-        frame = tk.Frame(root, padx=24, pady=20)
-        frame.pack(fill='both', expand=True)
-        tk.Label(frame, text='校园网余量', font=('Microsoft YaHei UI', 21, 'bold')).pack(anchor='w')
-        tk.Label(frame, text='计费流量剩余 · 网站记录值', fg='#566578').pack(anchor='w', pady=(6, 0))
-        tk.Label(frame, textvariable=self.remaining, font=('Microsoft YaHei UI', 34, 'bold'), fg='#167866').pack(anchor='w')
-        tk.Label(frame, textvariable=self.detail, justify='left').pack(anchor='w')
-        row = tk.Frame(frame)
-        row.pack(fill='x', pady=14)
+        from compact_ui import CompactView
         self.buttons = []
-        self.button(row, '刷新余量', lambda: self.submit('home'))
-        self.button(row, '下线并自动重查…', self.offline)
-        timers = tk.LabelFrame(frame, text='定时任务 · 程序运行且已登录时生效', padx=10, pady=8)
-        timers.pack(fill='x', pady=4)
-        for i, (text, enabled, interval, choices) in enumerate([
-            ('自动刷新余量，每', self.auto, self.refresh_minutes, (1, 2, 5, 10, 15, 30, 60)),
-            ('自动下线并重查，每', self.auto_offline, self.offline_minutes, (1, 5, 10, 15, 30, 60, 120, 180, 360))]):
-            tk.Checkbutton(timers, text=text, variable=enabled, command=lambda e=enabled: self.timer_changed(e)).grid(row=i, column=0, sticky='w')
-            box = ttk.Combobox(timers, textvariable=interval, values=choices, state='readonly', width=6)
-            box.grid(row=i, column=1, padx=6, pady=4)
-            box.bind('<<ComboboxSelected>>', lambda _: self.timer_changed())
-            tk.Label(timers, text='分钟').grid(row=i, column=2)
-        tk.Label(timers, textvariable=self.countdown, fg='#566578').grid(row=2, column=0, columnspan=3, sticky='w', pady=4)
-        login = tk.LabelFrame(frame, text='登录 · 验证码在此填写', padx=12, pady=10)
-        login.pack(fill='x', pady=12)
-        for i, (label, var, secret) in enumerate([('学号', self.user, False), ('密码', self.password, True), ('验证码', self.code, False)]):
-            tk.Label(login, text=label).grid(row=i, column=0, sticky='w', pady=4)
-            tk.Entry(login, textvariable=var, show='•' if secret else '', width=24).grid(row=i, column=1, padx=8)
-        self.captcha_label = tk.Label(login, text='点击获取验证码', width=19)
-        self.captcha_label.grid(row=0, column=2, rowspan=2)
-        buttons = tk.Frame(login)
-        buttons.grid(row=3, column=0, columnspan=3, sticky='w', pady=(8, 0))
-        self.button(buttons, '获取 / 更换验证码', lambda: self.submit('captcha'))
-        self.button(buttons, '登录', self.login)
-        remember = tk.Frame(login)
-        remember.grid(row=4, column=0, columnspan=3, sticky='w', pady=(8, 0))
-        tk.Checkbutton(remember, text='记住账号', variable=self.remember_user, command=lambda: self.credentials_changed('user')).pack(side='left')
-        tk.Checkbutton(remember, text='保存密码（Windows 加密）', variable=self.remember_password, command=lambda: self.credentials_changed('password')).pack(side='left')
-        tk.Label(frame, text='在线用量可能尚未结算。下线会断开账号下的在线设备。\n下线后自动查询约 6 秒；最终仍以服务器结算为准。', justify='left', fg='#806227').pack(anchor='w', pady=6)
-        tk.Label(frame, textvariable=self.status, wraplength=520, justify='left', fg='#42556c').pack(anchor='w', pady=8)
+        self.view = CompactView(self)
         if start_worker:
             threading.Thread(target=self.worker, daemon=True).start()
             root.after(300, lambda: self.submit('home'))
@@ -355,23 +333,26 @@ class App:
         self.closing = True
         self.root.destroy()
 
-    def button(self, parent, text, command):
-        button = tk.Button(parent, text=text, command=command, padx=10, pady=5)
-        button.pack(side='left', padx=(0, 8))
-        self.buttons.append(button)
-
     def submit(self, command, *args, automatic=False):
         if self.busy:
             return
         self.busy = True
         self.active_command = command
         self.active_auto = automatic
+        self.view.set_busy(True)
         for button in self.buttons:
             button.config(state='disabled')
         self.status.set('请求中…' if command != 'offline' else '正在下线并等待结算，随后自动重查…')
         self.jobs.put((command, args))
 
     def login(self):
+        if self.busy:
+            return
+        for name, variable in [('学号', self.user), ('密码', self.password), ('验证码', self.code)]:
+            if not variable.get().strip():
+                self.view.set_hint('请填写' + name + '。', error=True)
+                self.view.entries[name].focus_set()
+                return
         args = (self.user.get().strip(), self.password.get(), self.code.get().strip())
         if not self.persist():
             return
@@ -396,7 +377,7 @@ class App:
             except SessionExpired as exc:
                 self.results.put(('expired', str(exc)))
             except Exception as exc:
-                self.results.put(('error', str(exc)))
+                self.results.put(('error', friendly_error(exc)))
             finally:
                 if client.storage_notice:
                     self.results.put(('notice', client.storage_notice))
@@ -410,6 +391,7 @@ class App:
                 kind, result = self.results.get_nowait()
                 if kind == 'idle':
                     self.busy = False
+                    self.view.set_busy(False)
                     now = time.monotonic()
                     if self.active_command in ('home', 'offline', 'login', 'sms'):
                         self.next_refresh = now + int(self.refresh_minutes.get()) * 60
@@ -421,6 +403,7 @@ class App:
                     if not self.authenticated:
                         self.reset_timers()
                     self.authenticated = True
+                    self.view.success()
                     record = result[0]
                     self.remaining.set(value(record, '计费流量剩余'))
                     self.detail.set('已用：' + value(record, '已用流量') + '    免费剩余：' + value(record, '免费流量剩余') + '\n结算日期：' + value(record, '结算日期'))
@@ -436,12 +419,14 @@ class App:
                         except (ValueError, tk.TclError) as exc:
                             self.status.set('验证码图片读取失败：' + str(exc))
                             continue
-                        self.captcha_label.config(image=self.photo, text='', width=150)
+                        self.captcha_label.config(image=self.photo, text='', width=150, height=50)
                         self.code.set('')
+                        self.view.set_hint('验证码已更新，填写后按 Enter 登录。')
                         self.status.set('验证码已获取，请填写后登录。')
                 elif kind == 'sms':
                     sms_prompt = result
                 elif kind in ('error', 'expired'):
+                    self.view.error(result, expired=kind == 'expired')
                     if kind == 'expired':
                         self.authenticated = False
                     if self.active_command == 'offline':
