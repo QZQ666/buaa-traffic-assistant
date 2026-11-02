@@ -1,6 +1,8 @@
 # 北航校园网流量助手
 
-Windows 桌面小工具，通过北航校园网自助服务平台的 HTTPS 请求查询余量，无需启动浏览器。当前版本为 2.1.2，沿用 2.1 的紧凑单列界面。
+Windows 桌面小工具，通过北航校园网自助服务平台的 HTTPS 请求查询余量，无需启动浏览器。当前版本为 2.1.3，沿用 2.1 的紧凑单列界面。
+
+2.1.3 修复流量包子表嵌套时的产品余量识别：只读取当前产品表的行和单元格，不把套餐详情混入产品列。当前显示的是原产品字段，不将套餐包流量擅自加到计费余量中。
 
 2.1.2 统一字体、间距和原生控件，补充操作中提示、更新时间、输入校验和中文网络错误提示；较小窗口下支持滚动及键盘焦点跟随。登录、凭据保存、定时与安全限制保持原样。界面约定见 [DESIGN.md](DESIGN.md)。
 
@@ -57,10 +59,10 @@ DPAPI 数据可由当前 Windows 用户解密，请勿分享会话或凭据文�
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pyinstaller==6.20.0
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --onefile --windowed --name BuaaTrafficAPI_2.1.2 api_app.py
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --onefile --windowed --name BuaaTrafficAPI_2.1.3 api_app.py
 ```
 
-结果在 `dist/BuaaTrafficAPI_2.1.2.exe`。打包文件没有加入 Git 源码，发布包放在 Releases。
+结果在 `dist/BuaaTrafficAPI_2.1.3.exe`。打包文件没有加入 Git 源码，发布包放在 Releases。
 
 ## 验证
 
@@ -71,6 +73,7 @@ python tests/test_api.py
 python tests/test_persistence_timers.py
 python tests/test_request_security.py
 python tests/test_compact_ui.py
+python tests/test_product_packages.py
 ```
 
 测试使用虚构账号、会话和用量，不访问真实账号、不执行真实下线。覆盖 RSA 加密、CSRF 提交、表格解析、DPAPI 保存恢复、账号密码保存选项、定时任务优先级、防重入及错误暂停。

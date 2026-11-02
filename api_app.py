@@ -71,7 +71,20 @@ def restore_cookies(jar, data):
 def parse_home(html):
     soup = BeautifulSoup(html, 'html.parser')
     for table in soup.select('table'):
-        rows = [[c.get_text(' ', strip=True) for c in row.select('th,td')] for row in table.select('tr')]
+        # Expansion widgets can put the package table inside a product cell in the
+        # server response, then move it into a separate detail row in the browser.
+        # Count only this table's rows and this row's cells, never nested tables.
+        rows = []
+        for row in table.find_all('tr'):
+            if row.find_parent('table') is not table:
+                continue
+            cells = [cell for cell in row.find_all(['th', 'td']) if cell.find_parent('tr') is row]
+            texts = []
+            for cell in cells:
+                parts = [text.strip() for text in cell.find_all(string=True)
+                         if text.find_parent('table') is table and text.strip()]
+                texts.append(' '.join(parts))
+            rows.append(texts)
         for i, row in enumerate(rows):
             heads = [re.sub(r'\s+', '', s) for s in row]
             if '已用流量' in heads and any('计费流量剩余' in s for s in heads):
@@ -80,7 +93,7 @@ def parse_home(html):
                     return records
     if soup.select_one('#loginform-password'):
         raise SessionExpired('登录已失效，请获取验证码并重新登录。')
-    raise ValueError('未找到产品流量表；网站可能变更了页面。')
+    raise ValueError('未识别到产品余量。请确认已登录首页且有产品信息；页面还可能是服务提示或异常响应。')
 
 
 def value(record, label):
@@ -123,7 +136,7 @@ class Client:
         self.session = requests.Session()
         # Campus service is reached directly; do not inherit a development-shell proxy.
         self.session.trust_env = False
-        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.1.2', 'Referer': BASE + '/'})
+        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.1.3', 'Referer': BASE + '/'})
         self.soup = None
         self.pending = None
         try:
@@ -253,7 +266,7 @@ class App:
     def __init__(self, root, store=None, start_worker=True):
         self.root = root
         self.store = store or Store()
-        root.title('北航流量助手 · 2.1.2')
+        root.title('北航流量助手 · 2.1.3')
         root.geometry('620x760')
         root.minsize(560, 620)
         self.jobs, self.results = queue.Queue(), queue.Queue()
