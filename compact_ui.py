@@ -72,10 +72,12 @@ class CompactView:
         metric = self.row(self.body)
         metric.pack_configure(pady=(8, 0))
         self.label(metric, variable=app.remaining, size=30, bold=True, color=COLORS['accent']).pack(side='left')
-        self.label(metric, '计费流量剩余\n网站记录值', size=9).pack(side='left', padx=(16, 0))
+        self.label(metric, variable=app.remaining_source, size=9).pack(side='left', padx=(16, 0))
         details = self.row(self.body)
-        self.label(details, variable=app.detail, size=10).pack(side='left', anchor='n')
-        self.label(details, variable=self.updated, size=9).pack(side='right', anchor='n')
+        details.columnconfigure(0, weight=1)
+        self.detail_label = self.label(details, variable=app.detail, size=10, wrap=400)
+        self.detail_label.grid(row=0, column=0, sticky='nw')
+        self.label(details, variable=self.updated, size=9).grid(row=0, column=1, sticky='ne', padx=(8, 0))
         actions = self.row(self.body)
         actions.pack_configure(pady=(10, 0))
         self.refresh = self.button(actions, '刷新余量', lambda: app.submit('home'), 'Primary.Compact.TButton', width=12)
@@ -85,7 +87,7 @@ class CompactView:
         self.section('流量包')
         self.package_items = []
         self.package_caption = tk.StringVar(value='查询后显示网站提供的流量包记录。')
-        self.package_details = tk.StringVar(value='流量包单独列出，不与上方产品余量相加。')
+        self.package_details = tk.StringVar(value='主余量按免费、流量包、付费的顺序显示。')
         self.label(self.body, variable=self.package_caption, size=9).pack(anchor='w', pady=(0, 6))
         self.package_table = ttk.Treeview(self.body, columns=('name', 'traffic', 'valid', 'purchased'),
                                          show='headings', selectmode='browse', style='Packages.Treeview', height=1)
@@ -187,6 +189,8 @@ class CompactView:
             self.scroll.pack_forget()
             self.canvas.yview_moveto(0)
         wrap = max(250, self.canvas.winfo_width()-48)
+        if hasattr(self, 'detail_label'):
+            self.detail_label.configure(wraplength=max(200, wrap-115))
         for widget in (getattr(self, 'hint_label', None), getattr(self, 'countdown_label', None),
                        getattr(self, 'warning', None), getattr(self, 'package_details_label', None)):
             if widget:
@@ -235,7 +239,7 @@ class CompactView:
         if not packages:
             self.package_table.pack_forget()
             self.package_caption.set('本次页面未提供流量包记录。')
-            self.package_details.set('流量包单独列出，不与上方产品余量相加。')
+            self.package_details.set('主余量按免费、流量包、付费的顺序显示。')
             return
         self.package_caption.set(f'共 {len(packages)} 个流量包；数据与本次余量一起更新。')
         self.package_table.configure(height=len(packages))

@@ -6,6 +6,7 @@ import queue
 import re
 import threading
 import time
+from decimal import Decimal
 from http.cookiejar import Cookie
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -137,6 +138,37 @@ def value(record, label):
     return next((v for k, v in record.items() if label in k), '—')
 
 
+def traffic_bytes(text):
+    match = re.fullmatch(r'\s*(\d+(?:\.\d+)?)\s*(GiB|GB|G|MiB|MB|M|KiB|KB|K|bytes?|B)\s*', str(text), re.I)
+    if not match:
+        return None
+    unit = match[2].upper()
+    power = 3 if unit.startswith('G') else 2 if unit.startswith('M') else 1 if unit.startswith('K') else 0
+    return Decimal(match[1]) * (1024 ** power)
+
+
+def format_traffic(amount):
+    for power, unit in [(3, 'GB'), (2, 'MB'), (1, 'KB')]:
+        if amount >= 1024 ** power:
+            return f'{amount / (1024 ** power):.3f} {unit}'
+    return f'{amount.normalize():f} B'
+
+
+def select_remaining(record):
+    """Display the first nonempty tier; unrecognized data must not skip a tier."""
+    free, paid = value(record, '免费流量剩余'), value(record, '计费流量剩余')
+    amounts = [traffic_bytes(p.get('可用流量', '—')) for p in getattr(record, 'packages', [])]
+    package_total = None if any(a is None for a in amounts) else sum(amounts, Decimal(0))
+    free_amount = traffic_bytes(free)
+    if free_amount is None or free_amount > 0:
+        source, shown = '免费余量', free
+    elif package_total is None or package_total > 0:
+        source, shown = '流量包可用量', format_traffic(package_total) if package_total is not None else '—'
+    else:
+        source, shown = '付费余量', paid
+    return source, shown, format_traffic(package_total) if package_total is not None else '未识别完整'
+
+
 def captcha_image_data(raw):
     """Accept only small PNG/GIF CAPTCHA images supported by native Tk."""
     if len(raw) > 512 * 1024:
@@ -173,7 +205,7 @@ class Client:
         self.session = requests.Session()
         # Campus service is reached directly; do not inherit a development-shell proxy.
         self.session.trust_env = False
-        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.1.4', 'Referer': BASE + '/'})
+        self.session.headers.update({'User-Agent': 'BuaaTrafficDesktop/2.1.5', 'Referer': BASE + '/'})
         self.soup = None
         self.pending = None
         try:
@@ -303,7 +335,7 @@ class App:
     def __init__(self, root, store=None, start_worker=True):
         self.root = root
         self.store = store or Store()
-        root.title('北航流量助手 · 2.1.4')
+        root.title('北航流量助手 · 2.1.5')
         root.geometry('620x760')
         root.minsize(560, 620)
         self.jobs, self.results = queue.Queue(), queue.Queue()
@@ -328,6 +360,7 @@ class App:
         self.remember_password = tk.BooleanVar(value=settings.get('remember_password', False))
         self.countdown = tk.StringVar(value='正在恢复上次会话…')
         self.remaining = tk.StringVar(value='— GB')
+        self.remaining_source = tk.StringVar(value='当前优先余量\n等待查询')
         self.detail = tk.StringVar(value='尚未查询')
         self.status = tk.StringVar(value=load_notice or '启动时自动尝试复用上次 Cookie；有效时无需重新登录。')
         self.user, self.password, self.code = (tk.StringVar() for _ in range(3))
@@ -456,8 +489,12 @@ class App:
                     self.view.success()
                     record = result[0]
                     self.view.set_packages(getattr(record, 'packages', []))
-                    self.remaining.set(value(record, '计费流量剩余'))
-                    self.detail.set('已用：' + value(record, '已用流量') + '    免费剩余：' + value(record, '免费流量剩余') + '\n结算日期：' + value(record, '结算日期'))
+                    source, shown, package_total = select_remaining(record)
+                    self.remaining.set(shown)
+                    self.remaining_source.set(source + '\n网站记录值')
+                    self.detail.set('已用：' + value(record, '已用流量') + '    免费剩余：' + value(record, '免费流量剩余')
+                        + '\n流量包：' + package_total + '    付费剩余：' + value(record, '计费流量剩余')
+                        + '\n结算日期：' + value(record, '结算日期'))
                     self.status.set(('下线请求已发送，已重查；结算完成时间以学校服务器为准。' if kind == 'offline_data' else '查询成功。') + ' 更新于 ' + time.strftime('%H:%M:%S') + (f'，显示 {len(result)} 个产品中的第一个。' if len(result) > 1 else ''))
                 elif kind == 'captcha':
                     if result is None:
